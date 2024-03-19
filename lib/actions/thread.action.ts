@@ -4,6 +4,7 @@ import Thread from "../models/thread.model";
 import User from "../models/user.model";
 import { connectToDB } from "../mongoose";
 import page from "@/app/(root)/create-thread/page";
+import Community from "../models/community.model";
 
 interface params {
   text: string;
@@ -21,10 +22,15 @@ export async function createThread({
   try {
     connectToDB();
 
+    const communityIdObject = await Community.findOne(
+        { id: communityId },
+        { _id: 1 }
+      );
+
     const createdThread = await Thread.create({
       text,
       author,
-      community: null,
+      community: communityIdObject,
     });
 
     //Update users model
@@ -33,6 +39,14 @@ export async function createThread({
         threads: createdThread._id,
       },
     });
+
+    if (communityIdObject) {
+        // Update Community model
+        await Community.findByIdAndUpdate(communityIdObject, {
+          $push: { threads: createdThread._id },
+        });
+      }
+
     revalidatePath(path);
   } catch (error: any) {
     throw new Error(`Could not create thread: ${error.message}`);
@@ -46,21 +60,24 @@ export async function fetchPost(pageNumber = 1, pageSize = 20) {
   const skipAmount = (pageNumber - 1) * pageSize;
 
   // Fetch the posts with no parents (Top-level threads...)
-  const postsQuery = Thread.find({
-    parentId: {
-      $in: [null, undefined],
-    },
-  })
+  const postsQuery = Thread.find({ parentId: { $in: [null, undefined] } })
     .sort({ createdAt: "desc" })
     .skip(skipAmount)
     .limit(pageSize)
-    .populate({ path: "author", model: User })
     .populate({
-      path: "children",
+      path: "author",
+      model: User,
+    })
+    .populate({
+      path: "community",
+      model: Community,
+    })
+    .populate({
+      path: "children", // Populate the children field
       populate: {
-        path: "author",
+        path: "author", // Populate the author field within children
         model: User,
-        select: "_id name parentId image",
+        select: "_id name parentId image", // Select only _id and username fields of the author
       },
     });
 
